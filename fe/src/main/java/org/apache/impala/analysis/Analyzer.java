@@ -2215,8 +2215,8 @@ public class Analyzer {
   private void constructValueTransfersFromEqPredicates(WritableGraph g) {
     for (ExprId id : globalState_.conjuncts.keySet()) {
       Expr e = globalState_.conjuncts.get(id);
-      Pair<SlotId, SlotId> slotIds = BinaryPredicate.getEqSlots(e);
-      if (slotIds == null) continue;
+      Pair<SlotRef, SlotRef> slotRefs = BinaryPredicate.getEqSlotRefs(e);
+      if (slotRefs == null) continue;
 
       TableRef sjTblRef = globalState_.sjClauseByConjunct.get(id);
       Preconditions.checkState(sjTblRef == null || sjTblRef.getJoinOp().isSemiJoin());
@@ -2228,27 +2228,35 @@ public class Analyzer {
         // this eq predicate doesn't involve any outer or anti join, ie, it is true for
         // each result row;
         // value transfer is not legal if the receiving slot is in an enclosed
-        // scope of the source slot and the receiving slot's block has a limit
-        Analyzer firstBlock = globalState_.blockBySlot.get(slotIds.first);
-        Analyzer secondBlock = globalState_.blockBySlot.get(slotIds.second);
+        // scope of the source slot and the receiving slot's block has a limit;
+        // further, value transfer is not legal if the receiving slot references
+        // the output of an outer join since adding such an edge could filter out
+        // NULLs that are produced by the outer join
+        Analyzer firstBlock = globalState_.blockBySlot.get(slotRefs.first.getSlotId());
+        Analyzer secondBlock = globalState_.blockBySlot.get(slotRefs.second.getSlotId());
         if (LOG.isTraceEnabled()) {
-          LOG.trace("Considering value transfer between " + slotIds.first.toString() +
-              " and " + slotIds.second.toString());
+          LOG.trace("Considering value transfer between " +
+              slotRefs.first.getSlotId().toString() +
+              " and " + slotRefs.second.getSlotId().toString());
         }
         if (!(secondBlock.hasLimitOffsetClause_ &&
-            secondBlock.ancestors_.contains(firstBlock))) {
-          g.addEdge(slotIds.first.asInt(), slotIds.second.asInt());
+            secondBlock.ancestors_.contains(firstBlock))
+             && !this.isOuterJoined(slotRefs.second.getDesc().getParent().getId())) {
+          g.addEdge(slotRefs.first.getSlotId().asInt(),
+                     slotRefs.second.getSlotId().asInt());
           if (LOG.isTraceEnabled()) {
-            LOG.trace("value transfer: from " + slotIds.first.toString() + " to " +
-                slotIds.second.toString());
+            LOG.trace("value transfer: from " + slotRefs.first.getSlotId().toString() +
+                " to " + slotRefs.second.getSlotId().toString());
           }
         }
         if (!(firstBlock.hasLimitOffsetClause_ &&
-            firstBlock.ancestors_.contains(secondBlock))) {
-          g.addEdge(slotIds.second.asInt(), slotIds.first.asInt());
+            firstBlock.ancestors_.contains(secondBlock))
+                && !this.isOuterJoined(slotRefs.first.getDesc().getParent().getId())) {
+          g.addEdge(slotRefs.second.getSlotId().asInt(),
+                     slotRefs.first.getSlotId().asInt());
           if (LOG.isTraceEnabled()) {
-            LOG.trace("value transfer: from " + slotIds.second.toString() + " to " +
-                    slotIds.first.toString());
+            LOG.trace("value transfer: from " + slotRefs.second.getSlotId().toString() +
+                       " to " + slotRefs.first.getSlotId().toString());
           }
         }
         continue;
@@ -2264,12 +2272,12 @@ public class Analyzer {
 
       // this is some form of outer or anti join
       SlotId outerSlot, innerSlot;
-      if (tblRef.getId() == getTupleId(slotIds.first)) {
-        innerSlot = slotIds.first;
-        outerSlot = slotIds.second;
-      } else if (tblRef.getId() == getTupleId(slotIds.second)) {
-        innerSlot = slotIds.second;
-        outerSlot = slotIds.first;
+      if (tblRef.getId() == getTupleId(slotRefs.first.getSlotId())) {
+        innerSlot = slotRefs.first.getSlotId();
+        outerSlot = slotRefs.second.getSlotId();
+      } else if (tblRef.getId() == getTupleId(slotRefs.second.getSlotId())) {
+        innerSlot = slotRefs.second.getSlotId();
+        outerSlot = slotRefs.first.getSlotId();
       } else {
         // this eq predicate is part of an OJ/AJ clause but doesn't reference
         // the joined table -> ignore this, we can't reason about when it'll
