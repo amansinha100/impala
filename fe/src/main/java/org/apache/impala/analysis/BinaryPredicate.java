@@ -326,6 +326,25 @@ public class BinaryPredicate extends Predicate {
     op_ = op_.converse();
   }
 
+  /**
+   * If e is an equality predicate between two slots that only require implicit
+   * casts, returns those two slot refs; otherwise returns null.
+   */
+  public static Pair<SlotRef, SlotRef> getEqSlotRefs(Expr e) {
+    if (!(e instanceof BinaryPredicate) ||
+        ((BinaryPredicate) e).getOp() != Operator.EQ)
+      return null;
+    return ((BinaryPredicate) e).getSlotRefs();
+  }
+
+  public Pair<SlotRef, SlotRef> getSlotRefs() {
+    SlotRef lhs = getChild(0).unwrapSlotRef(true);
+    if (lhs == null) return null;
+    SlotRef rhs = getChild(1).unwrapSlotRef(true);
+    if (rhs == null) return null;
+    return new Pair<SlotRef, SlotRef>(lhs, rhs);
+  }
+
   @Override
   public boolean localEquals(Expr that) {
     return super.localEquals(that) && op_.equals(((BinaryPredicate)that).op_);
